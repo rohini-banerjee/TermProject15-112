@@ -1,8 +1,8 @@
 from cmu_112_graphics import *
 from threading import Thread
 import numpy as np
-import math, random, time
-import cv2, dlib
+import math, random, sys
+import cv2
 
 # CITATION: Improving FPS from https://www.pyimagesearch.com/2015/12/21/increasing-webcam-fps-with-python-and-opencv/
 class WebcamVideoStream:
@@ -28,80 +28,253 @@ class WebcamVideoStream:
     def stop(self):
         self.stopped = True
 
-class MySecondApp(App):
+class Point:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+
+    def getCoords(self):
+        return (self.x, self.y)
+
+    def updateCoords(self, newX, newY):
+        self.x = newX
+        self.y = newY
+
+class FingerDetect(App):
     vs = WebcamVideoStream(src=0).start()
+    FingerMouse = Point(0, 0)
 
     def appStarted(self):  
-        self.specConts = []
-        self.finalImg = self.createFrames()
-
         # Imported images
+
+        # image1 CITATION: https://images.app.goo.gl/pMDNw7xBT5sGrX7D6
         self.image1 = self.loadImage('learningBlocks.png')
         self.learningBlocks = self.scaleImage(self.image1, 1/19)
+
+        # image2 CITATION: https://images.app.goo.gl/he8JT9oR4Sk2T44N8
+        self.image2 = self.loadImage('rightArr.png')
+        self.rightArr = self.scaleImage(self.image2, 1/6.88)
+
+        # image3 CITATION: https://images.app.goo.gl/45MvqzXmMTMPGp369
+        self.image3 = self.loadImage('openEye.png')
+        self.openEye = self.scaleImage(self.image3, 1/19)
+
+        # image4 CITATION: https://images.app.goo.gl/jUcdwZvNwHwuyUwR9
+        self.image4 = self.loadImage('closedEye.png')
+        self.closedEye = self.scaleImage(self.image4, 1/8)
 
         # BOOLEANS
         self.isFirstPage = True
         self.isStartPressed = False
         self.mouseHoverStart = False
         self.introductionPage = False
+        self.onlyPoints = False
+        self.thresholdDetect = False
+        self.showEye = False
+        self.hideEye = False
         self.mouseHoverLearn = False
         self.learnPage1 = False
 
-    def createFrames(self):
-        self.frame = MySecondApp.vs.read()
+        self.specConts = []
+        self.finalImg = self.createFrames()
 
+    def createFrames(self):
+        self.frame = FingerDetect.vs.read()
+        self.frame = cv2.flip(self.frame, 1)
         self.frame2 = cv2.Canny(self.frame, 100, 200)
 
-        self.spectConts = []
+        self.specConts = []
 
         self.contours, self.hierarchy = cv2.findContours(self.frame2,  
             cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
-        
-        # self.contours is a non-rectangular array, each dimension being a new contour level
+
+        # initialize local var
         temp = []
-        fullArrForTest = []
+        (sx, sy) = (0, 0)
+
+        pinkyIndex = (-1000, -1000)
+
+        thumbIndex = (1000, 1000)
+
+        pointerIndex = (1000, 1000)
+        minDistPointer = 10000
+
+        ringIndex = (-1000, -1000)
+        minDistRing = 10000
+
+        middleIndex = (-1000, -1000)
+        minDistMiddle = 10000
+
+        leftPalmPt = (1000, 1000)
+        minDistToLeft = 10000
+
+        rightPalmPt = (-1000, -1000)
+        minDistToRight = 10000
+        
+        midPalmPt = (1065, 450)
+
+        # self.contours is a non-rectangular array, each dimension being a new contour level
+        # following code selects contours specifically within the purple box
         level1Len = len(self.contours)
         for level1 in range(level1Len):
             level2Len = len(self.contours[level1])
             for level2 in range(level2Len):
                 [[x, y]] = self.contours[level1][level2]
-                if ((320 <= x <= 550) and (220 <= y <= 450)):
+                if ((950 <= x <= 1180) and (220 <= y <= 450)):
                     temp.append([x, y])
-                fullArrForTest.append([x, y])
             if temp != []:
                 newArr = np.array(temp, dtype=np.int32)
                 self.specConts.append(newArr)
             temp = []
+
+        for layer in range(len(self.specConts)):
+            contLen = len(self.specConts[layer])
+            for cont in range(contLen):
+                (sx, sy) = self.specConts[layer][cont]
+
+                # Pinky Finger Detection
+                if ((sx, sy) > pinkyIndex):
+                    pinkyIndex = (sx, sy)
+
+                # Thumb Detection
+                if ((sx, sy) < thumbIndex):
+                    thumbIndex = (sx, sy)
+
+                # Pointer Finger Detection
+                #       i.e. minimizes distance between contour coord and top left corner of box
+                if (self.distance(950, 220, sx, sy) < minDistPointer and sx < 1065 and sy < 335):
+                    pointerIndex = (sx, sy)
+                    minDistPointer = self.distance(950, 220, sx, sy)
+                
+                # Ring Finger Detection
+                #       i.e. minimizes distance between contour coord and top right corner of box
+                if (self.distance(1180, 220, sx, sy) < minDistRing and sx > 1065 and sy < 335):
+                    ringIndex = (sx, sy)
+                    minDistRing = self.distance(1180, 220, sx, sy)
+                
+                # Middle Finger Detection
+                #       i.e. approximate center point between Pointer and Ring fingers and minimize to top of box
+                distPointerToRing = self.distance(pointerIndex[0], pointerIndex[1], ringIndex[0], ringIndex[1])
+                approxMidPointX = pointerIndex[0] + distPointerToRing / 2
+                if ((approxMidPointX - 7 <= sx <= approxMidPointX + 7) and (self.distance(1065, 220, sx, sy) < minDistMiddle)):
+                    middleIndex = (sx, sy)
+                    minDistMiddle = self.distance(1065, 220, sx, sy)
+
+                # Find intersection of left side of palm with bottom of the purple box
+                d1 = self.distance(sx, sy, thumbIndex[0], thumbIndex[1])    # distance from left of palm to thumbIndex
+                d2 = self.distance(sx, sy, pinkyIndex[0], pinkyIndex[1])    # distance from left of palm to pinkyIndex
+
+                if ((sy == 450) and (self.distance(950, 450, thumbIndex[0], thumbIndex[1]) < minDistToLeft)
+                                and (d1 < d2)):
+                    leftPalmPt = (sx, sy)
+                    minDistToLeft = self.distance(950, 450, sx, sy)
+
+                # Find intersection of the right of palm with bottom of the purple box
+                if ((sy == 450) and (self.distance(1180, 450, pinkyIndex[0], pinkyIndex[1]) < minDistToRight)
+                                and (d2 < d1)):
+                    rightPalmPt = (sx, sy)
+                    minDistToRight = self.distance(1180, 450, sx, sy)
+
+                # Find midpoint of both ends of the palm
+                midPalmPt = self.midPoint(leftPalmPt[0], 450, rightPalmPt[0], 450)
+                if (midPalmPt[0] < 1060 or midPalmPt[0] > 1070):
+                    midPalmPt = (1065, midPalmPt[1])
+       
+        if self.isStartPressed:
+            if self.onlyPoints:
+                # draw circles on fingertips
+                self.frame = self.drawCircleFingers(pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex)
+                self.frame = cv2.circle(self.frame, midPalmPt, 6, (255,0,0), -1)
+
+                # draw skeleton lines
+                if midPalmPt[1] > 220:
+                    self.frame = self.drawSkeletonLines(pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex, midPalmPt)
+                return self.frame
         
-        ''' for cont in self.specConts:
-            finalImg = cv2.drawContours(self.frame, [cont], -1, (0, 255, 0), 3)
-         '''
+            else:
+                # draws circles on fingertips AND contours
+                self.frame = self.drawCircleFingers(pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex)
+                return cv2.drawContours(self.frame, self.specConts, -1, (0, 255, 0), 3)
         
-        return cv2.drawContours(self.frame, self.specConts, -1, (0, 255, 0), 3)
+        # user switches to pointing their finger 
+        elif self.thresholdDetect:
+            # first determine the largest contour in ROI (detect hand)
+            largestContours = self.findLargestCont(self.specConts)
+
+            # next determine which point on the largest contour represents the pointer finger
+            minDistBetweenCorners = 10000
+            pointerFingerInd = 0
+            for _ in range(len(largestContours)):
+                [kx, ky] = largestContours[_]
+                actualDist = (self.distance(kx, ky, 950, 220) ** 2) + (self.distance(kx, ky, 1180, 220) ** 2)
+                if (actualDist < minDistBetweenCorners):
+                    minDistBetweenCorners = actualDist
+                    pointerFingerInd = _
+
+            # draw a circle to represent the virtual mouse
+            (x,y) = largestContours[pointerFingerInd]
+            FingerDetect.FingerMouse.updateCoords(x, y)
+
+            # show / hide contours + virtual mouse depending on button pressed
+            if self.showEye:
+                self.frame = cv2.drawContours(self.frame, [largestContours], -1, (0, 255, 255), 3) 
+                return cv2.circle(self.frame, FingerDetect.FingerMouse.getCoords(), 8, (255,0,0), -1)
+            return self.frame
         
-    def resizeByWidth(self, imgShape, newHeight):
-        (oldHeight, oldWidth, depth) = imgShape
-        factor = (newHeight / oldHeight)
-        newWidth = int(oldWidth * factor)
-        return (newWidth, newHeight)
+        else:
+            return self.frame
+
+    def findLargestCont(self, contours):
+        ind = maxP = 0
+        minimumPer = 100
+        for layer in range(len(contours)):
+            cont = contours[layer]
+            currentP = cv2.arcLength(cont, closed=False)
+            if ((currentP > minimumPer) and (currentP > maxP)):
+                maxP = currentP
+                ind = layer
+        return contours[ind]
+
+    def drawCircleFingers(self, pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex):
+        self.frame = cv2.circle(self.frame, pinkyIndex, 6, (0,0,255), -1)
+        self.frame = cv2.circle(self.frame, thumbIndex, 6, (0,0,255), -1)
+        self.frame = cv2.circle(self.frame, pointerIndex, 6, (0,0,255), -1)
+        self.frame = cv2.circle(self.frame, ringIndex, 6, (0,0,255), -1)
+        return cv2.circle(self.frame, middleIndex, 6, (0,0,255), -1)
+
+    def drawSkeletonLines(self, pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex, midPalmPt):
+        self.frame = cv2.line(self.frame, pinkyIndex, midPalmPt, (255,0,0), 2)
+        self.frame = cv2.line(self.frame, thumbIndex, midPalmPt, (255,0,0), 2)
+        self.frame = cv2.line(self.frame, pointerIndex, midPalmPt, (255,0,0), 2)
+        self.frame = cv2.line(self.frame, ringIndex, midPalmPt, (255,0,0), 2)
+        return cv2.line(self.frame, middleIndex, midPalmPt, (255,0,0), 2)
+
+    def distance(self, x0, y0, x1, y1):
+        return ((y1 - y0) ** 2 + (x1 - x0) ** 2) ** 0.5
+
+    def midPoint(self, x0, y0, x1, y1):
+        return ((x0 + x1) // 2, (y0 + y1) // 2)
 
     def grayscaleImg(self):
         return cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
 
     def keyPressed(self, event):
-        # terminate webcam frame read if 't' pressed
+        # terminate webcam frame read if 't' pressed at any time
         if event.key == 't':
-            MySecondApp.vs.stop()
+            FingerDetect.vs.stop()
 
         if self.introductionPage and event.key == 's':
             self.isStartPressed = True
             self.introductionPage = False
 
+        if self.isStartPressed and event.key == 'd':
+            self.onlyPoints = True
+
     def timerFired(self):
-        if self.isStartPressed:
+        if self.isStartPressed or self.thresholdDetect:
             # draw Box for hand:
-            (x0, y0) = (320, 220)
-            (x1, y1) = (550, 450)
+            (x0, y0) = (950, 220)
+            (x1, y1) = (1180, 450)
 
             self.finalImg = cv2.rectangle(self.createFrames(), (x0,  y0), (x1, y1), (128,0,128), 3)
 
@@ -112,10 +285,26 @@ class MySecondApp(App):
         if (self.isFirstPage == True) and (self.width / 2 - 150 <= x <= self.width / 2 + 150) and (self.height / 2 + 40 <= y <= self.height / 2 + 80):
             self.introductionPage = True
             self.isFirstPage = False
+
+        # Mouse clicks NEXT button on webcam screen
+        if ((self.width - 50 <= x <= self.width - 15) and (self.height - 100 <= y <= self.height - 65)):
+            # FIRST click: transition to thresholding detection algorithm
+            if (self.isStartPressed):
+                self.thresholdDetect = True
+                self.isStartPressed = False
+                self.hideEye = True
+
+        if self.thresholdDetect:
+            if (self.showEye) and (self.width - 50 <= x <= self.width - 15) and (self.height - 150 <= y <= self.height - 115):
+                self.showEye = False
+                self.hideEye = True
+            elif (self.hideEye) and (self.width - 50 <= x <= self.width - 15) and (self.height - 150 <= y <= self.height - 115):
+                self.hideEye = False
+                self.showEye = True
         
         # Mouse clicks LEARN button
         if (self.isStartPressed == True) and (self.width - 50 <= x <= self.width - 15) and (self.height - 50 <= y <= self.height - 15):
-            MySecondApp.vs.stop()
+            FingerDetect.vs.stop()
             self.learnPage1 = True
             self.isStartPressed = False
 
@@ -135,9 +324,14 @@ class MySecondApp(App):
             self.mouseHoverLearn = False
 
     def redrawAll(self, canvas):
-        if self.isStartPressed:
+        if self.isStartPressed or self.thresholdDetect:
             canvas.create_image((350, 300), image=ImageTk.PhotoImage(self.fromOpenCVtoPIL(self.finalImg)))
             self.drawLearnButton(canvas)
+            self.drawRightArrow(canvas)
+            if self.isStartPressed:
+                canvas.create_text(self.width - 150, 15, text="Press 'd' to only show dots", font="Courier 16 italic", fill="white")
+            elif self.thresholdDetect:
+                self.drawHideShow(canvas)
             if self.mouseHoverLearn:
                 # shows border when mouse hovers
                 canvas.create_rectangle(self.width - 50, self.height - 50, self.width - 15, self.height - 15, fill = "lightGreen", outline="white", width=3)
@@ -150,7 +344,7 @@ class MySecondApp(App):
             self.drawIntroPage(canvas)
         elif self.learnPage1:
             self.drawBackground(canvas)
-            canvas.create_text(self.width / 2, self.height - 20, text="Press 'c' to continue.", font="Courier 11 bold")
+            canvas.create_text(self.width / 2, self.height - 20, text="Press 'c' to continue.", font="Courier 16 bold", fill="black")
             self.drawLearnPage1(canvas)
 
     def drawBackground(self, canvas):
@@ -170,13 +364,36 @@ class MySecondApp(App):
         canvas.create_text(self.width // 2, 70, text="Move close to the camera so your Webcam can track both\nyour eyes and fingers", font = "Arial 24 bold")
         canvas.create_text(self.width // 2, 130, text="When you're ready, press 'S' and close your eyes to begin!", font = "Arial 24 bold")
 
+    # Drawing buttons on webcam screen
     def drawLearnButton(self, canvas):
         canvas.create_rectangle(self.width - 50, self.height - 50, self.width - 15, self.height - 15, fill = "lightGreen", width=0)
         canvas.create_image(self.width - 32.75, self.height - 32.75, image=ImageTk.PhotoImage(self.learningBlocks))
     
+    def drawRightArrow(self, canvas):
+        canvas.create_image(self.width - 32.75, self.height - 82.75, image=ImageTk.PhotoImage(self.rightArr))
+        canvas.create_rectangle(self.width - 50, self.height - 100, self.width - 15, self.height - 65, outline="lightGreen", width=3)
+
+    def drawHideShow(self, canvas):
+        canvas.create_rectangle(self.width - 50, self.height - 150, self.width - 15, self.height - 115, fill="lightGreen", outline="white", width=3)
+        if self.hideEye:
+            canvas.create_image(self.width - 32.75, self.height - 132.75, image=ImageTk.PhotoImage(self.openEye))
+        elif self.showEye:
+            canvas.create_image(self.width - 32.75, self.height - 132.75, image=ImageTk.PhotoImage(self.closedEye))
+
+    
+    # Part 2 Drawings
     def drawLearnPage1(self, canvas):
         canvas.create_text(self.width / 2, 40, text="Wonder how this Finger Detection works?", font="Courier 30 bold")
+        canvas.create_text(self.width / 2 - 250, 110, text="Detecting the edges or", font="Courier 18")
+        canvas.create_text(self.width / 2 - 75, 110, text="contours", font="Courier 18 italic")
+        canvas.create_text(self.width / 2 + 140, 110, text="of your hand is achieved with", font="Courier 18")
+        canvas.create_text(self.width / 2 - 181, 130, text="the Canny Edge Detection algorithm.", font="Courier 18")
 
+        canvas.create_text(self.width / 2 - 15, 170, text="Although openCV has a built-in Canny function optimized for speed", font="Courier 18")
+        canvas.create_text(self.width / 2 - 20, 190, text="and efficiency, (which was implemented for finger detection), we", font="Courier 18")
+        canvas.create_text(self.width / 2 - 141, 210, text="will explore a hand-written version of it.", font="Courier 18")
+
+    # Learning how to convert from PIL image to OpenCV: https://stackoverflow.com/questions/43232813/convert-opencv-image-format-to-pil-image-format
     def fromPILtoOpenCV(self, PILimg):
         np_img = np.array(PILimg)
         return cv2.cvtColor(np_img, cv2.COLOR_RGB2BGR)
@@ -191,7 +408,7 @@ class MySecondApp(App):
 
     # Part 2 of Project
 
-     def reduceNoiseAndBlur(self, img):
+    def reduceNoiseAndBlur(self, img):
         averagedFilter = np.array([[1/16, 1/8, 1/16], [1/8, 1/4, 1/8], [1/16, 1/8, 1/16]])
         blurred = self.convolveWith(img, averagedFilter)
         blurred = cv2.GaussianBlur(blurred, (11, 11), 0) 
@@ -342,4 +559,4 @@ class MySecondApp(App):
         
         return suppressed
 
-MySecondApp(width=990, height=600)
+FingerDetect(width=990, height=600)
