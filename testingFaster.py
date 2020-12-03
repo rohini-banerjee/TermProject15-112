@@ -32,6 +32,7 @@ class Point:
     def __init__(self, x, y):
         self.x = x
         self.y = y
+        self.positions = []
 
     def getCoords(self):
         return (self.x, self.y)
@@ -40,13 +41,20 @@ class Point:
         self.x = newX
         self.y = newY
 
+class Ball(Point):
+    def __init__(self, x, y):
+        super().__init__(x, y)
+        self.color = "lightGreen"
+        self.radius = 10
+        self.score = 0
+
 class FingerDetect(App):
     vs = WebcamVideoStream(src=0).start()
     FingerMouse = Point(0, 0)
+    Player = Ball(0, 0)
 
     def appStarted(self):  
         # Imported images
-
         # image1 CITATION: https://images.app.goo.gl/pMDNw7xBT5sGrX7D6
         self.image1 = self.loadImage('learningBlocks.png')
         self.learningBlocks = self.scaleImage(self.image1, 1/19)
@@ -62,6 +70,13 @@ class FingerDetect(App):
         # image4 CITATION: https://images.app.goo.gl/jUcdwZvNwHwuyUwR9
         self.image4 = self.loadImage('closedEye.png')
         self.closedEye = self.scaleImage(self.image4, 1/8)
+        
+        # Personal images (no citation necessary)
+        self.image5 = self.loadImage('Tutorial_Img.png')
+        self.tutorImg = self.scaleImage(self.image5, 1/3.2)
+
+        self.image6 = self.loadImage('interactive_buttons.png')
+        self.buttonsEx = self.scaleImage(self.image6, 1)
 
         # BOOLEANS
         self.isFirstPage = True
@@ -72,9 +87,12 @@ class FingerDetect(App):
         self.thresholdDetect = False
         self.showEye = False
         self.hideEye = False
+        self.showErrorMsg = False
         self.mouseHoverLearn = False
+        self.playChallenge = False
         self.learnPage1 = False
 
+        # Miscellaneous
         self.specConts = []
         self.finalImg = self.createFrames()
 
@@ -197,8 +215,13 @@ class FingerDetect(App):
                 return cv2.drawContours(self.frame, self.specConts, -1, (0, 255, 0), 3)
         
         # user switches to pointing their finger 
-        elif self.thresholdDetect:
+        elif self.thresholdDetect or self.playChallenge:
             # first determine the largest contour in ROI (detect hand)
+            if len(self.specConts) == 0:
+                self.showErrorMsg = True
+                return self.frame
+
+            self.showErrorMsg = False
             largestContours = self.findLargestCont(self.specConts)
 
             # next determine which point on the largest contour represents the pointer finger
@@ -212,8 +235,44 @@ class FingerDetect(App):
                     pointerFingerInd = _
 
             # draw a circle to represent the virtual mouse
-            (x,y) = largestContours[pointerFingerInd]
+            (x,y) = largestContours[pointerFingerInd]           # (x, y) is current pos
             FingerDetect.FingerMouse.updateCoords(x, y)
+
+            # look at prev pos, approxiate new pos of Player, append currentPos to pos and remove old pos
+            if (len(FingerDetect.FingerMouse.positions) > 0):
+                (oldX, oldY) = FingerDetect.FingerMouse.positions[0]
+                deltaX = x - oldX
+                deltaY = y - oldY
+
+                (px, py) = FingerDetect.Player.getCoords()
+                units = 10
+
+                # find new pos for Player based upon deltaX, deltaY
+                if (deltaX < 0):
+                    if (deltaY < 0):
+                        newCoords = (px - units, py - units)
+                    elif (deltaY > 0):
+                        newCoords = (px - units, py + units)
+                    else:
+                        newCoords = (px - units, py)
+                elif (deltaX > 0):
+                    if (deltaY < 0):
+                        newCoords = (px + units, py - units)
+                    elif (deltaY > 0):
+                        newCoords = (px + units, py + units)
+                    else:
+                        newCoords = (px - units, py)
+                else:
+                    if (deltaY < 0):
+                        newCoords = (px, py - units)
+                    elif (deltaY > 0):
+                        newCoords = (px, py + units)
+                    else:
+                        newCoords = (px, py)
+                
+                FingerDetect.Player.updateCoords(newCoords[0], newCoords[1])
+                FingerDetect.FingerMouse.positions.append((x, y))
+                FingerDetect.FingerMouse.positions.pop(0)
 
             # show / hide contours + virtual mouse depending on button pressed
             if self.showEye:
@@ -271,12 +330,20 @@ class FingerDetect(App):
             self.onlyPoints = True
 
     def timerFired(self):
-        if self.isStartPressed or self.thresholdDetect:
+        if self.isStartPressed or self.thresholdDetect or self.playChallenge:
             # draw Box for hand:
             (x0, y0) = (950, 220)
             (x1, y1) = (1180, 450)
 
             self.finalImg = cv2.rectangle(self.createFrames(), (x0,  y0), (x1, y1), (128,0,128), 3)
+
+            if self.playChallenge:
+                # add up to 5 old positions to construct "tail" of Player
+                if (len(FingerDetect.Player.positions) < 5):
+                    currentPos = FingerDetect.Player.getCoords()
+                    FingerDetect.Player.positions.append(currentPos)
+                else:
+                    FingerDetect.Player.positions.pop(0)
 
     def mousePressed(self, event):
         (x, y) = (event.x, event.y)
@@ -286,15 +353,23 @@ class FingerDetect(App):
             self.introductionPage = True
             self.isFirstPage = False
 
-        # Mouse clicks NEXT button on webcam screen
+        # Mouse clicks ARROW button on webcam screen
         if ((self.width - 50 <= x <= self.width - 15) and (self.height - 100 <= y <= self.height - 65)):
             # FIRST click: transition to thresholding detection algorithm
             if (self.isStartPressed):
-                self.thresholdDetect = True
                 self.isStartPressed = False
+                self.thresholdDetect = True
                 self.hideEye = True
 
-        if self.thresholdDetect:
+            # SECOND click: transition to solving drawing/maze challenge
+            elif (self.thresholdDetect):
+                self.thresholdDetect = False
+                self.playChallenge = True
+                FingerDetect.Player.updateCoords(150, 490)
+                FingerDetect.FingerMouse.positions.append((150, 490))
+
+        # Mouse clicks HIDE/SHOW button
+        if self.thresholdDetect or self.playChallenge:
             if (self.showEye) and (self.width - 50 <= x <= self.width - 15) and (self.height - 150 <= y <= self.height - 115):
                 self.showEye = False
                 self.hideEye = True
@@ -303,10 +378,15 @@ class FingerDetect(App):
                 self.showEye = True
         
         # Mouse clicks LEARN button
-        if (self.isStartPressed == True) and (self.width - 50 <= x <= self.width - 15) and (self.height - 50 <= y <= self.height - 15):
+        if ((self.isStartPressed) or (self.thresholdDetect) or (self.playChallenge)) and (self.width - 50 <= x <= self.width - 15) and (self.height - 50 <= y <= self.height - 15):
             FingerDetect.vs.stop()
             self.learnPage1 = True
-            self.isStartPressed = False
+            if self.isStartPressed:
+                self.isStartPressed = False
+            elif self.thresholdDetect:
+                self.thresholdDetect = False
+            elif self.playChallenge:
+                self.playChallenge = False
 
     def mouseMoved(self, event):
         (x, y) = (event.x, event.y)
@@ -318,34 +398,60 @@ class FingerDetect(App):
             self.mouseHoverStart = False
 
         # Mouse hovers over LEARN button
-        if (self.isStartPressed == True) and (self.width - 50 <= x <= self.width - 15) and (self.height - 50 <= y <= self.height - 15):
+        if ((self.isStartPressed == True) or (self.thresholdDetect == True)) and (self.width - 50 <= x <= self.width - 15) and (self.height - 50 <= y <= self.height - 15):
             self.mouseHoverLearn = True
         else:
             self.mouseHoverLearn = False
 
+        ''' if self.playChallenge:
+            print(x, y) '''
+
     def redrawAll(self, canvas):
-        if self.isStartPressed or self.thresholdDetect:
+        if self.isStartPressed or self.thresholdDetect or self.playChallenge:
             canvas.create_image((350, 300), image=ImageTk.PhotoImage(self.fromOpenCVtoPIL(self.finalImg)))
             self.drawLearnButton(canvas)
             self.drawRightArrow(canvas)
+            
             if self.isStartPressed:
                 canvas.create_text(self.width - 150, 15, text="Press 'd' to only show dots", font="Courier 16 italic", fill="white")
-            elif self.thresholdDetect:
+           
+            elif self.thresholdDetect or self.playChallenge:
                 self.drawHideShow(canvas)
+                if self.showErrorMsg:
+                    self.drawErrorMessage(canvas)
+                
+                if self.playChallenge:
+                    # draw Player
+                    (px, py) = FingerDetect.Player.getCoords()
+                    r = FingerDetect.Player.radius
+                    canvas.create_oval(px - r, py - r, px + r, py + r, fill=FingerDetect.Player.color, outline="white", width=2)
+
+                    # draw Player tail
+                    self.drawPlayerTail(canvas)
+
             if self.mouseHoverLearn:
                 # shows border when mouse hovers
                 canvas.create_rectangle(self.width - 50, self.height - 50, self.width - 15, self.height - 15, fill = "lightGreen", outline="white", width=3)
                 canvas.create_image(self.width - 32.75, self.height - 32.75, image=ImageTk.PhotoImage(self.learningBlocks))
+        
         elif self.isFirstPage:
             self.drawStartPage(canvas)
             if self.mouseHoverStart:
                 canvas.create_rectangle(self.width / 2 - 150, self.height / 2 + 40, self.width / 2 + 150, self.height / 2 + 80, outline="black", width = 7)
+        
         elif self.introductionPage:
             self.drawIntroPage(canvas)
+        
         elif self.learnPage1:
             self.drawBackground(canvas)
             canvas.create_text(self.width / 2, self.height - 20, text="Press 'c' to continue.", font="Courier 16 bold", fill="black")
             self.drawLearnPage1(canvas)
+
+    def drawPlayerTail(self, canvas):
+        L = FingerDetect.Player.positions
+        r = 3
+        for (x, y) in L:
+            canvas.create_oval(x - r, y - r, x + r, y + r, fill="lightGreen", width=0)
 
     def drawBackground(self, canvas):
         canvas.create_rectangle(0, 0, 70, self.height, fill="lightPink", width = 0)
@@ -354,15 +460,29 @@ class FingerDetect(App):
 
     def drawStartPage(self, canvas):
         self.drawBackground(canvas)
-
+        canvas.create_text(self.width / 2, self.height / 2 - 73, text="THE VIRTUAL MOUSE SIMULATOR:", font = "Courier 16 bold")
         canvas.create_text(self.width / 2, self.height / 2 - 40, text="A Touchless Turn of Events!", font = "Courier 32 bold")
-
         canvas.create_text(self.width / 2, self.height / 2 + 60, text="CLICK TO START", font = "Courier 28 bold")
 
     def drawIntroPage(self, canvas):
-        canvas.create_text(self.width // 2, 20, text="Welcome to the Camera!", font = "Arial 36 bold")
-        canvas.create_text(self.width // 2, 70, text="Move close to the camera so your Webcam can track both\nyour eyes and fingers", font = "Arial 24 bold")
-        canvas.create_text(self.width // 2, 130, text="When you're ready, press 'S' and close your eyes to begin!", font = "Arial 24 bold")
+        self.drawBackground(canvas)
+        canvas.create_text(self.width // 2 - 4, 40, text="Welcome to the Virtual Mouse Simulator!", font = "Courier 33 bold", fill="white")
+        canvas.create_text(self.width // 2, 40, text="Welcome to the Virtual Mouse Simulator!", font = "Courier 33 bold")
+
+        canvas.create_text(self.width // 2, 105, text="When the simulation begins, place your hand in the purple\nbox such that ALL fingers fit within. (See below):", font = "Courier 20")
+        canvas.create_image(self.width // 2, 240, image=ImageTk.PhotoImage(self.tutorImg))
+        canvas.create_rectangle(342, 148, 650, 333, outline="white", width = 2)
+
+        canvas.create_text(self.width // 2, 355, text="You can interact with the screen buttons on the side panel.", font = "Courier 20")
+        canvas.create_image(200, 450, image=ImageTk.PhotoImage(self.buttonsEx))
+        canvas.create_rectangle(177, 378, 225, 526, outline="white", width = 2)
+
+        canvas.create_text(590, 450, text="1. Press the Eye button to show/hide contours & virtual mouse.\n2. Press the arrow to advance steps in the simulation.\n3. Press the ABC's to learn more about the algorithms. ", font = "Courier 16")
+
+        canvas.create_text(self.width // 2, self.height - 50, text="When you're ready to begin, please press 'S'. Enjoy!", font = "Courier 20 bold")
+
+    def drawErrorMessage(self, canvas):
+        canvas.create_text(775, 140, text="Please move hand & fingers back in box.", font="Courier 10 italic", fill="white")
 
     # Drawing buttons on webcam screen
     def drawLearnButton(self, canvas):
@@ -401,10 +521,6 @@ class FingerDetect(App):
     def fromOpenCVtoPIL(self, openCVimg):
         convert = cv2.cvtColor(openCVimg, cv2.COLOR_BGR2RGB)
         return Image.fromarray(convert)
-
-    def debuggingScript(self, place):
-        # prints line to test if program runs up to that line
-        print(f"Working up to {place}!!")
 
     # Part 2 of Project
 
@@ -558,5 +674,11 @@ class FingerDetect(App):
                         suppressed[cRow - 1][cCol] = suppressed[cRow][cCol] = 0
         
         return suppressed
+
+
+    # Miscellaneous Functions
+    def debuggingScript(self, place):
+        # prints line to test if program runs up to that line
+        print(f"Working up to {place}!!")
 
 FingerDetect(width=990, height=600)
