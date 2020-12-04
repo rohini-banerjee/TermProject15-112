@@ -13,6 +13,7 @@ class WebcamVideoStream:
     
     def start(self):
         Thread(target=self.update, args=()).start()
+        self.stopped = False
         return self
     
     def update(self):
@@ -53,7 +54,10 @@ class FingerDetect(App):
     FingerMouse = Point(0, 0)
     Player = Ball(0, 0)
 
-    def appStarted(self):  
+    def appStarted(self):
+        self.restartApp()
+
+    def restartApp(self):  
         # Imported images
         # image1 CITATION: https://images.app.goo.gl/pMDNw7xBT5sGrX7D6
         self.image1 = self.loadImage('learningBlocks.png')
@@ -70,6 +74,24 @@ class FingerDetect(App):
         # image4 CITATION: https://images.app.goo.gl/jUcdwZvNwHwuyUwR9
         self.image4 = self.loadImage('closedEye.png')
         self.closedEye = self.scaleImage(self.image4, 1/8)
+
+        # image7 CITATION: https://images.app.goo.gl/BR6LAkV9UfiC9bRQ9
+        self.image7 = self.loadImage('katniss_everdeen.jpg')
+        self.katniss = self.scaleImage(self.image7, 1/4.3)
+
+        # image 8 CITATION: https://sbme-tutorials.github.io/2018/cv/notes/4_week4.html
+        self.image8 = self.loadImage('avg_kernel.png')
+        self.avg_kernel = self.scaleImage(self.image8, 1)
+
+        # image 9, 10 CITATION: https://medium.com/datadriveninvestor/understanding-edge-detection-sobel-operator-2aada303b900
+        self.image9 = self.loadImage('sobelX.png')
+        self.image10 = self.loadImage('sobelY.png')
+        self.sobelX = self.scaleImage(self.image9, 1/2)
+        self.sobelY = self.scaleImage(self.image10, 1/2)
+
+        # image 11 CITATION: http://www.cse.psu.edu/~rtc12/CSE486/lecture05.pdf
+        self.image11 = self.loadImage('magnitude.png')
+        self.mag = self.scaleImage(self.image11, 1/2.2)
         
         # Personal images (no citation necessary)
         self.image5 = self.loadImage('Tutorial_Img.png')
@@ -90,7 +112,20 @@ class FingerDetect(App):
         self.showErrorMsg = False
         self.mouseHoverLearn = False
         self.playChallenge = False
+        
+
         self.learnPage1 = False
+        self.learnPage1B = False
+        self.learnPage2 = False
+        self.performGray = False
+        self.performAvgVal = False
+        self.performBlur = False
+        self.learnPage3 = False
+        self.xDir = False
+        self.yDir = False
+        self.learnPage4 = False
+        self.sobelGrad = False
+        self.finalNote = False
 
         # Miscellaneous
         self.specConts = []
@@ -248,7 +283,7 @@ class FingerDetect(App):
                 units = 10
 
                 # find new pos for Player based upon deltaX, deltaY
-                if (deltaX < 0):
+                '''if (deltaX < 0):
                     if (deltaY < 0):
                         newCoords = (px - units, py - units)
                     elif (deltaY > 0):
@@ -268,9 +303,12 @@ class FingerDetect(App):
                     elif (deltaY > 0):
                         newCoords = (px, py + units)
                     else:
-                        newCoords = (px, py)
+                        newCoords = (px, py) '''
+                newX = px + 3 * deltaX
+                newY = py + 3 * deltaY
                 
-                FingerDetect.Player.updateCoords(newCoords[0], newCoords[1])
+                if (0 < newX < self.width) and (0 < newY < self.height):
+                    FingerDetect.Player.updateCoords(newX, newY)
                 FingerDetect.FingerMouse.positions.append((x, y))
                 FingerDetect.FingerMouse.positions.pop(0)
 
@@ -314,9 +352,6 @@ class FingerDetect(App):
     def midPoint(self, x0, y0, x1, y1):
         return ((x0 + x1) // 2, (y0 + y1) // 2)
 
-    def grayscaleImg(self):
-        return cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
-
     def keyPressed(self, event):
         # terminate webcam frame read if 't' pressed at any time
         if event.key == 't':
@@ -328,6 +363,50 @@ class FingerDetect(App):
 
         if self.isStartPressed and event.key == 'd':
             self.onlyPoints = True
+
+        if self.learnPage1 and event.key == 'c':
+            self.learnPage1B = True
+            self.learnPage1 = False
+
+        elif self.learnPage1B and event.key == 'c':
+            self.learnPage1B = False
+            self.learnPage2 = True
+
+        elif self.learnPage2 and event.key == 'c':
+            self.performGray = True
+            self.learnPage2 = False
+        
+        elif self.performGray and event.key == 'c':
+            self.performAvgVal = True
+            self.performGray = False
+        
+        elif self.performAvgVal and event.key == 'c':
+            self.performBlur = True
+            self.performAvgVal = False
+        
+        elif self.performBlur and event.key == 'c':
+            self.learnPage3 = True
+            self.performBlur = False
+
+        elif self.learnPage3 and event.key == 'c':
+            self.xDir = True
+            self.learnPage3 = False
+
+        elif self.xDir and event.key == 'c':
+            self.yDir = True
+            self.xDir = False
+
+        elif self.yDir and event.key == 'c':
+            self.learnPage4 = True
+            self.yDir = False
+
+        elif self.learnPage4 and event.key == 'c':
+            self.sobelGrad = True
+            self.learnPage4 = False
+
+        elif self.sobelGrad and event.key == 'c':
+            self.finalNote = True
+            self.sobelGrad = False
 
     def timerFired(self):
         if self.isStartPressed or self.thresholdDetect or self.playChallenge:
@@ -365,8 +444,9 @@ class FingerDetect(App):
             elif (self.thresholdDetect):
                 self.thresholdDetect = False
                 self.playChallenge = True
-                FingerDetect.Player.updateCoords(150, 490)
-                FingerDetect.FingerMouse.positions.append((150, 490))
+                FingerDetect.Player.updateCoords(150, 300)
+                mousePos = FingerDetect.FingerMouse.getCoords()
+                FingerDetect.FingerMouse.positions.append(mousePos)
 
         # Mouse clicks HIDE/SHOW button
         if self.thresholdDetect or self.playChallenge:
@@ -388,6 +468,13 @@ class FingerDetect(App):
             elif self.playChallenge:
                 self.playChallenge = False
 
+        # Mouse clicks DONE button
+        if (self.finalNote) and (self.width / 2 - 40 <= x <= self.width / 2 + 40) and (self.height - 70 <= y <= self.height - 30):
+            self.isFirstPage = True
+            self.finalNote = False
+            self.restartApp()
+            FingerDetect.vs.start()
+
     def mouseMoved(self, event):
         (x, y) = (event.x, event.y)
 
@@ -403,7 +490,7 @@ class FingerDetect(App):
         else:
             self.mouseHoverLearn = False
 
-        ''' if self.playChallenge:
+        ''' if self.learnPage1:
             print(x, y) '''
 
     def redrawAll(self, canvas):
@@ -442,10 +529,28 @@ class FingerDetect(App):
         elif self.introductionPage:
             self.drawIntroPage(canvas)
         
-        elif self.learnPage1:
+        elif self.learnPage1 or self.learnPage1B:
             self.drawBackground(canvas)
-            canvas.create_text(self.width / 2, self.height - 20, text="Press 'c' to continue.", font="Courier 16 bold", fill="black")
             self.drawLearnPage1(canvas)
+
+        elif self.learnPage2 or self.performGray or self.performAvgVal or self.performBlur:
+            self.drawBackground(canvas)
+            self.drawProgressBar(canvas)
+            self.drawLearnPage2(canvas)
+
+        elif self.learnPage3 or self.xDir or self.yDir:
+            self.drawBackground(canvas)
+            self.drawProgressBar(canvas)
+            self.drawLearnPage3(canvas)
+        
+        elif self.learnPage4 or self.sobelGrad:
+            self.drawBackground(canvas)
+            self.drawProgressBar(canvas)
+            self.drawLearnPage4(canvas)
+
+        elif self.finalNote:
+            self.drawBackground(canvas)
+            self.drawFinalNote(canvas)
 
     def drawPlayerTail(self, canvas):
         L = FingerDetect.Player.positions
@@ -457,6 +562,8 @@ class FingerDetect(App):
         canvas.create_rectangle(0, 0, 70, self.height, fill="lightPink", width = 0)
         canvas.create_rectangle(self.width - 70, 0, self.width, self.height, fill="lightPink", width = 0)
         canvas.create_rectangle(70, 0, self.width - 70, self.height, fill="lightBlue", width = 0)
+        if not self.isFirstPage and not self.introductionPage and not self.finalNote:
+            canvas.create_text(self.width / 2, self.height - 20, text="Press 'c' to continue.", font="Courier 16 bold", fill="black")
 
     def drawStartPage(self, canvas):
         self.drawBackground(canvas)
@@ -477,7 +584,7 @@ class FingerDetect(App):
         canvas.create_image(200, 450, image=ImageTk.PhotoImage(self.buttonsEx))
         canvas.create_rectangle(177, 378, 225, 526, outline="white", width = 2)
 
-        canvas.create_text(590, 450, text="1. Press the Eye button to show/hide contours & virtual mouse.\n2. Press the arrow to advance steps in the simulation.\n3. Press the ABC's to learn more about the algorithms. ", font = "Courier 16")
+        canvas.create_text(590, 450, text="1. Press the Eye button to show/hide contours & virtual mouse.\n2. Press the arrow to advance steps in the simulation.\n3. Press the ABC's to learn more about the algorithm. ", font = "Courier 16")
 
         canvas.create_text(self.width // 2, self.height - 50, text="When you're ready to begin, please press 'S'. Enjoy!", font = "Courier 20 bold")
 
@@ -513,6 +620,105 @@ class FingerDetect(App):
         canvas.create_text(self.width / 2 - 20, 190, text="and efficiency, (which was implemented for finger detection), we", font="Courier 18")
         canvas.create_text(self.width / 2 - 141, 210, text="will explore a hand-written version of it.", font="Courier 18")
 
+        if self.learnPage1B:
+            canvas.create_text(self.width // 2 - 4, 280, text="CANNY EDGE DETECTION", font = "Courier 27 bold", fill="white")
+            canvas.create_text(self.width // 2, 280, text="CANNY EDGE DETECTION", font="Courier 27 bold")
+            canvas.create_text(self.width // 2 - 50, 320, text="We will review the following main steps of this algorithm:", font="Courier 18")
+
+            canvas.create_rectangle(324, 365, 674, 464, outline="black", width=3)
+            canvas.create_text(500, 416, text="1. Img prep (Grayscale, Noise Reduction, \nBlur)\n2. X-,Y- convolutions\n3. Developing Sobel gradient\n4. [A Final Note]", font="Courier 14")
+    
+    def drawProgressBar(self, canvas):
+        if self.learnPage2 or self.performGray or self.performAvgVal or self.performBlur:
+            canvas.create_rectangle(self.width / 4 - 40, 10, self.width / 4 + 40, 30, outline="black", width=2)
+
+        elif self.learnPage3 or self.xDir or self.yDir:
+            canvas.create_rectangle(self.width / 2 - 66, 10, self.width / 2 + 66, 30, outline="black", width=2)
+
+        elif self.learnPage4 or self.sobelGrad:
+            canvas.create_rectangle(3 * self.width / 4 - 55, 10, 3 * self.width / 4 + 55, 30, outline="black", width=2)
+
+        canvas.create_text(self.width / 4, 20, text="Image Prep", font="Courier 12")
+        canvas.create_text(self.width / 2, 20, text="X- Y- Convolution", font="Courier 12")
+        canvas.create_text(3 * self.width / 4, 20, text="Sobel Gradient", font="Courier 12")
+
+    def drawOriginal(self, canvas):
+        canvas.create_text(self.width / 2, 110, text="Our Original Image:", font="Courier 20")
+        canvas.create_image(self.width // 2, 220, image=ImageTk.PhotoImage(self.katniss))
+
+    def drawLearnPage2(self, canvas):
+        canvas.create_text(self.width / 2, 60, text="STEP 1: Image Prep", font="Courier 30 bold")
+        self.drawOriginal(canvas)
+
+        # prepare images for slide
+        grayimg = self.grayscaleImg(self.fromPILtoOpenCV(self.katniss))
+        avgdimg = self.reduceNoise(grayimg)
+        blurred = self.blur(avgdimg)
+
+        if self.performGray:
+            canvas.create_text(self.width / 2, 345, text="First, we want to convert our image to grayscale to simplify our detection of color\nfrom multiple channels (i.e. RGB: (255, 255, 255)) to a single channel (255).", font="Courier 14")
+            canvas.create_image(self.width // 2, 460, image=ImageTk.PhotoImage(self.fromOpenCVtoPIL(grayimg)))
+
+        elif self.performAvgVal:
+            canvas.create_text(self.width / 2, 340, text="Next, we perform an average value convolution on the grayscale image to reduce some noise.\nConvolutions are performed by sliding a small 3x3 kernel matrix over the large matrix of pixel\nvalues to emphasize/diminish certain values.", font="Courier 14")
+            canvas.create_image(self.width // 2, 460, image=ImageTk.PhotoImage(self.fromOpenCVtoPIL(avgdimg)))
+            canvas.create_image(self.width // 2 + 275, 460, image=ImageTk.PhotoImage(self.avg_kernel))
+
+        elif self.performBlur:
+            canvas.create_text(self.width / 2, 345, text="Finally, we will blur the image since edge detection is susceptible to noise (OpenCV documentation).", font="Courier 14")
+            canvas.create_image(self.width // 2, 460, image=ImageTk.PhotoImage(self.fromOpenCVtoPIL(blurred)))
+
+    def drawLearnPage3(self, canvas):
+        canvas.create_text(self.width / 2, 60, text="STEP 2: X- Y- Convolutions", font="Courier 30 bold")
+        self.drawOriginal(canvas)
+
+        newImg = self.scaleImage(self.image7, 1/5.5)
+        grayimg = self.grayscaleImg(self.fromPILtoOpenCV(newImg))
+        prepped = self.reduceNoiseAndBlur(grayimg)
+        xImg = self.sobelKernelConvolutionX(prepped)
+        yImg = self.sobelKernelConvolutionY(prepped)
+
+        canvas.create_text(self.width / 2, 345, text="Now that we have succesfully prepped our image, we will now implement convolutions in the X- and Y-\ndirections to emphasize pixel values on the edges WRT both directions.", font="Courier 14")
+
+        if self.xDir or self.yDir:
+            canvas.create_text(self.width / 4, 375, text="X-Direction", font="Courier 18 bold")
+            canvas.create_image(self.width / 4, 460, image=ImageTk.PhotoImage(self.tryThis(xImg)))
+            canvas.create_image(self.width / 4 + 180, 460, image=ImageTk.PhotoImage(self.sobelX))
+            if self.yDir:
+                canvas.create_text(3 * self.width / 4, 375, text="Y-Direction", font="Courier 18 bold")
+                canvas.create_image(3 * self.width / 4 - 70, 460, image=ImageTk.PhotoImage(self.tryThis(yImg)))
+                canvas.create_image(3 * self.width / 4 + 105, 460, image=ImageTk.PhotoImage(self.sobelY))
+
+    def drawLearnPage4(self, canvas):
+        newImg = self.fromPILtoOpenCV(self.katniss)
+        newImg = self.grayscaleImg(newImg) 
+        finalImg = self.sobelIntensityGradient(newImg)
+        scaledMag = self.scaleImage(self.image11, 1/3.6)
+
+        canvas.create_text(self.width / 2, 60, text="STEP 3: Establishing Sobel Gradient", font="Courier 30 bold")
+        self.drawOriginal(canvas)
+        
+        canvas.create_text(self.width / 2, 345, text="To find the gradient of the image, we need to resolve the two convolutions from the x- and y- \ndirections. This is achieved by computing the following magnitude:", font="Courier 14")
+        
+        if self.learnPage4:
+            canvas.create_image(self.width // 2, 460, image=ImageTk.PhotoImage(self.mag))
+
+        if self.sobelGrad:
+            canvas.create_image(self.width // 2, 460, image=ImageTk.PhotoImage(self.fromOpenCVtoPIL(finalImg)))
+            canvas.create_image(self.width // 2 + 230, 460, image=ImageTk.PhotoImage(scaledMag))
+    
+    def drawFinalNote(self, canvas):
+        canvas.create_text(self.width / 2, 60, text="A Final Note", font="Courier 30 bold")
+        canvas.create_text(self.width / 2, 200, text="The Canny edge detection algorithm available from the OpenCV library\nperforms similar steps, except in a more optimized fashion.", font="Courier 20")
+        canvas.create_text(self.width / 2, 275, text="The algorithm implemented for the tutorial is unfortunately less\nefficient,since we apply convolutions pixel-by-pixel as we shift\nacross the image matrix.", font="Courier 20")
+        canvas.create_text(self.width / 2, 375, text="In addition, the accepted algorithm from OpenCV conducts two\nadditional steps, non-maximum suppression and hystersis thresholding\nto A) suppress values that are probably not edges", font="Courier 20")
+        canvas.create_text(self.width / 2, 450, text="and finally B) use threshold values to determine which\nremaining values are truly edges.", font="Courier 20")
+        self.drawDoneButton(canvas)
+
+    def drawDoneButton(self, canvas):
+        canvas.create_text(self.width / 2, self.height - 50, text="DONE", font = "Courier 28 bold")
+        canvas.create_rectangle(self.width / 2 - 40, self.height - 70, self.width / 2 + 40, self.height - 30, outline="black", width=3)
+
     # Learning how to convert from PIL image to OpenCV: https://stackoverflow.com/questions/43232813/convert-opencv-image-format-to-pil-image-format
     def fromPILtoOpenCV(self, PILimg):
         np_img = np.array(PILimg)
@@ -522,22 +728,35 @@ class FingerDetect(App):
         convert = cv2.cvtColor(openCVimg, cv2.COLOR_BGR2RGB)
         return Image.fromarray(convert)
 
+    def tryThis(self, openCVimg):
+        return Image.fromarray(openCVimg)
+
     # Part 2 of Project
+    # Understanding theory of Canny edge detection from OpenCV documentation: https://docs.opencv.org/master/da/d22/tutorial_py_canny.html
+
+    def grayscaleImg(self, img):
+        return cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    def reduceNoise(self, img):
+        averagedFilter = np.array([[1/16, 1/8, 1/16], [1/8, 1/4, 1/8], [1/16, 1/8, 1/16]])
+        return self.convolveWith(img, averagedFilter)
+
+    def blur(self, img):
+        return cv2.GaussianBlur(img, (11, 11), 0) 
 
     def reduceNoiseAndBlur(self, img):
-        averagedFilter = np.array([[1/16, 1/8, 1/16], [1/8, 1/4, 1/8], [1/16, 1/8, 1/16]])
-        blurred = self.convolveWith(img, averagedFilter)
-        blurred = cv2.GaussianBlur(blurred, (11, 11), 0) 
+        avgd = self.reduceNoise(img)
+        blurred = self.blur(avgd)
         return blurred 
 
-    def sobelKernelConvolutionX(self):
+    def sobelKernelConvolutionX(self, img):
         sobelX = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])        
-        hwOutputSobelX = self.convolveWithout(self.image2, sobelX)
+        hwOutputSobelX = self.convolveWithout(img, sobelX)
         return hwOutputSobelX
 
-    def sobelKernelConvolutionY(self):
+    def sobelKernelConvolutionY(self, img):
         sobelY = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
-        hwOutputSobelY = self.convolveWithout(self.image2, sobelY)
+        hwOutputSobelY = self.convolveWithout(img, sobelY)
         return hwOutputSobelY
     
     def convolveWithout(self, theImg, kernel):
@@ -589,11 +808,11 @@ class FingerDetect(App):
 
         return newImgArr
 
-    def sobelIntensityGradient(self):
-        theImg = self.reduceNoiseAndBlur(self.image2)
+    def sobelIntensityGradient(self, img):
+        theImg = self.reduceNoiseAndBlur(img)
 
-        sobelXImg = self.sobelKernelConvolutionX()
-        sobelYImg = self.sobelKernelConvolutionY()
+        sobelXImg = self.sobelKernelConvolutionX(theImg)
+        sobelYImg = self.sobelKernelConvolutionY(theImg)
 
         (sizeH, sizeW) = sobelXImg.shape
 
