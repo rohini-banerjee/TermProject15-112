@@ -1,6 +1,6 @@
 from cmu_112_graphics import *
 from threading import Thread
-from random import shuffle, randrange, randint       # randint(a, b) inclusive
+from random import shuffle, randrange, randint, choice
 import math, sys, cv2, textwrap
 import numpy as np
 
@@ -121,6 +121,10 @@ class FingerDetect(App):
         self.notDrawCoin1 = False
         self.notDrawCoin2 = False
         self.winner = False
+        self.showSol = False
+        self.drawFeature = False
+        self.widthOptions = False
+        self.colorOptions = False
         
         self.learnPage1 = False
         self.learnPage1B = False
@@ -138,7 +142,14 @@ class FingerDetect(App):
         # Miscellaneous
         self.specConts = []     # list of all specific contours
         self.mazePts = []
+        self.solution = []
         self.coin1Pos = self.coin2Pos = (0, 0)
+
+        self.pencilWidth = 2
+        self.posColors = ["blue", "red", "green", "pink", "gray", "black", "yellow", "orange", "purple"]
+        self.color = "black"
+        self.drawingDots = []
+
         self.finalImg = self.createFrames()
 
     def createFrames(self):
@@ -318,6 +329,10 @@ class FingerDetect(App):
                             FingerDetect.Player.updateCoords(newX, newY)
                         else:
                             FingerDetect.Player.updateCoords(px, py)
+                elif self.drawFeature:
+                    if (100 + offset < newX < 550 - offset) and (100 + offset < newY < 400 - offset):
+                        FingerDetect.Player.updateCoords(newX, newY)
+                        FingerDetect.Player.positions.append((newX, newY))
                 else:
                     if ((offset < newX < self.width - offset) and (offset < newY < self.height - offset)):
                         FingerDetect.Player.updateCoords(newX, newY)
@@ -482,11 +497,13 @@ class FingerDetect(App):
                 currentPos = FingerDetect.Player.getCoords()
                 
                 # add up to 5 old positions to construct "tail" of Player
-                if (len(FingerDetect.Player.positions) < 5):
-                    FingerDetect.Player.positions.append(currentPos)
-                else:
-                    FingerDetect.Player.positions.pop(0)
+                if not self.drawFeature:
+                    if (len(FingerDetect.Player.positions) < 5):
+                        FingerDetect.Player.positions.append(currentPos)
+                    else:
+                        FingerDetect.Player.positions.pop(0)
                 
+                # if collided with Coin1 or Coin2, add +5 to score
                 if self.playMaze:
                     (px, py) = currentPos
                     (c1x, c1y) = self.coin1Pos
@@ -500,6 +517,10 @@ class FingerDetect(App):
                     
                     if self.distance(px, py, 530, 370) <= FingerDetect.Player.radius:
                         self.winner = True
+                
+                if self.drawFeature:
+                    if self.showErrorMsg:
+                        FingerDetect.Player.positions = []
 
     def mousePressed(self, event):
         (x, y) = (event.x, event.y)
@@ -526,12 +547,19 @@ class FingerDetect(App):
                 FingerDetect.FingerMouse.positions.append(mousePos)
 
             # THIRD click: transition to maze challenge
-            elif (self.playChallenge):
+            elif (self.playChallenge and not self.playMaze):
                 self.playMaze = True
                 self.createMaze()
                 self.coin1Pos = self.findCoinPos()
                 self.coin2Pos = self.findCoinPos()
                 FingerDetect.Player.updateCoords(515, 370)
+
+            # FOURTH click: transition to new feature: drawing
+            elif (self.playChallenge and self.playMaze):
+                self.playMaze = False
+                self.drawFeature = True
+                self.winner = False
+                FingerDetect.Player.updateCoords(325, 200)
 
         # Mouse clicks HIDE/SHOW button
         if self.thresholdDetect or self.playChallenge:
@@ -559,6 +587,46 @@ class FingerDetect(App):
             self.finalNote = False
             self.restartApp()
             FingerDetect.vs.start()     # restart reading frames from webcam again
+
+        # Mouse clicks CHANGE WIDTH button
+        if (self.drawFeature) and (100 <= x <= 130) and (405 <= y <= 435):
+            if self.widthOptions == False:
+                self.widthOptions = True
+            else:
+                self.widthOptions = False
+        
+        # Mouse clicks INCREASE width button
+        if (self.widthOptions):
+            if (105 <= x <= 125) and (445 <= y <= 465):
+                self.pencilWidth += 2
+            elif (130 <= x <= 150) and (445 <= y <= 465):
+                if self.pencilWidth > 2:
+                    self.pencilWidth -= 2
+
+        # Mouse clicks CHANGE COLOR button
+        if (self.drawFeature) and (135 <= x <= 165) and (405 <= y <= 435):
+            if self.colorOptions == False:
+                self.colorOptions = True
+            else:
+                self.colorOptions = False
+
+        # Mouse clicks RED/BLUE/YELLOW button
+        if (self.colorOptions):
+            if (140 <= x <= 160) and (445 <= y <= 465):
+                self.color = "blue"
+            elif (165 <= x <= 185) and (445 <= y <= 465):
+                self.color = "red"
+            elif (190 <= x <= 210) and (445 <= y <= 465):
+                self.color = "yellow"
+
+        # Mouse clicks RANDOM COLOR button
+        if (self.drawFeature) and (170 <= x <= 190) and (405 <= y <= 435):
+            self.color = choice(self.posColors)
+
+        # Mouse clicks CREATE DOT button
+        if (self.drawFeature) and (205 <= x <= 235) and (405 <= y <= 435):
+            (x, y) = FingerDetect.Player.getCoords()
+            self.drawingDots.append((x, y))
 
     def mouseMoved(self, event):
         (x, y) = (event.x, event.y)
@@ -619,6 +687,15 @@ class FingerDetect(App):
                             canvas.create_text(325, 450, text="You Win!", font="Courier 32 bold", fill="white")
 
                         self.drawMazeDirections(canvas)
+                    
+                    if self.drawFeature:
+                        canvas.create_rectangle(100, 100, 550, 400, fill="white", width=5)
+                        self.drawTablet(canvas)
+                        self.drawToolbar(canvas)
+                        if self.widthOptions:
+                            self.drawWidthOptions(canvas)
+                        elif self.colorOptions:
+                            self.drawColorOptions(canvas)
 
                     # draw Player
                     (px, py) = FingerDetect.Player.getCoords()
@@ -626,7 +703,7 @@ class FingerDetect(App):
                     if not self.winner:
                         canvas.create_oval(px - r, py - r, px + r, py + r, fill=FingerDetect.Player.color, outline="white", width=2)
 
-                    if not self.playMaze:
+                    if not self.playMaze and not self.drawFeature:
                         canvas.create_text(self.width / 8, 20, text="A. Virtual Mouse", font="Courier 20 bold", fill="white")
                         
                         # draw Player tail
@@ -705,7 +782,10 @@ class FingerDetect(App):
         canvas.create_text(self.width // 2, self.height - 50, text="When you're ready to begin, please press 'S'. Enjoy!", font = "Courier 20 bold")
 
     def drawErrorMessage(self, canvas):
-        canvas.create_text(775, 140, text="Please move hand & fingers back in box.", font="Courier 10 italic", fill="white")
+        if self.drawFeature:
+            canvas.create_text(775, 140, text="Canvas Cleared!", font="Courier 10 italic", fill="white")
+        else:
+            canvas.create_text(775, 140, text="Please move hand & fingers back in box.", font="Courier 10 italic", fill="white")
 
     # Drawing buttons on webcam screen
     def drawLearnButton(self, canvas):
@@ -876,6 +956,51 @@ class FingerDetect(App):
     def drawCoin2(self, canvas):
         (x2, y2) = self.coin2Pos
         canvas.create_image(x2, y2, image=ImageTk.PhotoImage(self.coin))
+
+    def drawTablet(self, canvas):
+        L = FingerDetect.Player.positions
+        for _ in range(1, len(L)):
+            (x0, y0) = L[_ - 1]
+            (x1, y1) = L[_]
+            canvas.create_line(x0, y0, x1, y1, fill=self.color, width=self.pencilWidth)
+
+    def drawToolbar(self, canvas):
+        # change line width button:
+        canvas.create_rectangle(100, 405, 130, 435, fill="gray", width=2)
+        canvas.create_line(103, 430, 127, 410, fill="black", width=3)
+
+        # change color button:
+        canvas.create_rectangle(135, 405, 165, 435, fill="gray", width=2)
+        canvas.create_oval(140, 410, 150, 420, fill="blue", width=0)
+        canvas.create_oval(150, 410, 160, 420, fill="red", width=0)
+        canvas.create_oval(145, 420, 155, 430, fill="yellow", width=0)
+
+        # randomize color button:
+        canvas.create_rectangle(170, 405, 200, 435, fill="gray", width=2)
+        canvas.create_oval(175, 410, 185, 420, fill="blue", width=0)
+        canvas.create_oval(185, 410, 195, 420, fill="red", width=0)
+        canvas.create_oval(180, 420, 190, 430, fill="yellow", width=0)
+        canvas.create_text(185, 420, text="?", font="Courier 30 bold", fill="black")
+
+        # drawing dot button:
+        canvas.create_rectangle(205, 405, 235, 435, fill="gray", width=2)
+        canvas.create_oval(210, 410, 230, 430, fill="black", width=0)
+
+    def drawWidthOptions(self, canvas):
+        canvas.create_rectangle(100, 440, 155, 470, fill="lightGreen", width=1)
+
+        canvas.create_rectangle(105, 445, 125, 465, fill="gray", width = 1)
+        canvas.create_text(115, 455, text="+", font="Courier 30 bold", fill="black")
+
+        canvas.create_rectangle(130, 445, 150, 465, fill="gray", width = 1)
+        canvas.create_text(140, 455, text="-", font="Courier 30 bold", fill="black")
+
+    def drawColorOptions(self, canvas):
+        canvas.create_rectangle(135, 440, 215, 470, fill="lightGreen", width=1)
+
+        canvas.create_rectangle(140, 445, 160, 465, fill="blue", width = 1)
+        canvas.create_rectangle(165, 445, 185, 465, fill="red", width = 1)
+        canvas.create_rectangle(190, 445, 210, 465, fill="yellow", width = 1)
 
     # Learning how to convert from PIL image to OpenCV: https://stackoverflow.com/questions/43232813/convert-opencv-image-format-to-pil-image-format
     def fromPILtoOpenCV(self, PILimg):
