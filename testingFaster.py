@@ -1,10 +1,10 @@
 from cmu_112_graphics import *
 from threading import Thread
+from random import shuffle, randrange, randint       # randint(a, b) inclusive
+import math, sys, cv2, textwrap
 import numpy as np
-import math, random, sys
-import cv2
 
-# CITATION: Improving FPS from https://www.pyimagesearch.com/2015/12/21/increasing-webcam-fps-with-python-and-opencv/
+# CITATION: Modified code to improve FPS from https://www.pyimagesearch.com/2015/12/21/increasing-webcam-fps-with-python-and-opencv/
 class WebcamVideoStream:
     def __init__(self, src=0):
         self.stream = cv2.VideoCapture(src)
@@ -12,8 +12,8 @@ class WebcamVideoStream:
         self.stopped = False
     
     def start(self):
+        self.stopped = False       # added this line so I can start/stop as many times on command
         Thread(target=self.update, args=()).start()
-        self.stopped = False
         return self
     
     def update(self):
@@ -92,6 +92,10 @@ class FingerDetect(App):
         # image 11 CITATION: http://www.cse.psu.edu/~rtc12/CSE486/lecture05.pdf
         self.image11 = self.loadImage('magnitude.png')
         self.mag = self.scaleImage(self.image11, 1/2.2)
+
+        # image 12 CITATION: https://images.app.goo.gl/FzmRF8nNZjZVsved9
+        self.image12 = self.loadImage('money.png')
+        self.coin = self.scaleImage(self.image12, 1/17)
         
         # Personal images (no citation necessary)
         self.image5 = self.loadImage('Tutorial_Img.png')
@@ -112,8 +116,12 @@ class FingerDetect(App):
         self.showErrorMsg = False
         self.mouseHoverLearn = False
         self.playChallenge = False
+        self.playMaze = False
+        self.collision = False
+        self.notDrawCoin1 = False
+        self.notDrawCoin2 = False
+        self.winner = False
         
-
         self.learnPage1 = False
         self.learnPage1B = False
         self.learnPage2 = False
@@ -128,7 +136,9 @@ class FingerDetect(App):
         self.finalNote = False
 
         # Miscellaneous
-        self.specConts = []
+        self.specConts = []     # list of all specific contours
+        self.mazePts = []
+        self.coin1Pos = self.coin2Pos = (0, 0)
         self.finalImg = self.createFrames()
 
     def createFrames(self):
@@ -141,7 +151,7 @@ class FingerDetect(App):
         self.contours, self.hierarchy = cv2.findContours(self.frame2,  
             cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
 
-        # initialize local var
+        # initialize local vars.
         temp = []
         (sx, sy) = (0, 0)
 
@@ -167,7 +177,7 @@ class FingerDetect(App):
         midPalmPt = (1065, 450)
 
         # self.contours is a non-rectangular array, each dimension being a new contour level
-        # following code selects contours specifically within the purple box
+        # The following code selects contours specifically within ROI:
         level1Len = len(self.contours)
         for level1 in range(level1Len):
             level2Len = len(self.contours[level1])
@@ -180,6 +190,8 @@ class FingerDetect(App):
                 self.specConts.append(newArr)
             temp = []
 
+        # loop through contours within ROI and determine which points on contour correspond
+        # to which fingertip
         for layer in range(len(self.specConts)):
             contLen = len(self.specConts[layer])
             for cont in range(contLen):
@@ -194,26 +206,26 @@ class FingerDetect(App):
                     thumbIndex = (sx, sy)
 
                 # Pointer Finger Detection
-                #       i.e. minimizes distance between contour coord and top left corner of box
+                #       i.e. minimizes distance between contour coord and top left corner of ROI
                 if (self.distance(950, 220, sx, sy) < minDistPointer and sx < 1065 and sy < 335):
                     pointerIndex = (sx, sy)
                     minDistPointer = self.distance(950, 220, sx, sy)
                 
                 # Ring Finger Detection
-                #       i.e. minimizes distance between contour coord and top right corner of box
+                #       i.e. minimizes distance between contour coord and top right corner of ROI
                 if (self.distance(1180, 220, sx, sy) < minDistRing and sx > 1065 and sy < 335):
                     ringIndex = (sx, sy)
                     minDistRing = self.distance(1180, 220, sx, sy)
                 
                 # Middle Finger Detection
-                #       i.e. approximate center point between Pointer and Ring fingers and minimize to top of box
+                #       i.e. approximate center point between Pointer and Ring fingers and minimize to top of ROI
                 distPointerToRing = self.distance(pointerIndex[0], pointerIndex[1], ringIndex[0], ringIndex[1])
                 approxMidPointX = pointerIndex[0] + distPointerToRing / 2
                 if ((approxMidPointX - 7 <= sx <= approxMidPointX + 7) and (self.distance(1065, 220, sx, sy) < minDistMiddle)):
                     middleIndex = (sx, sy)
                     minDistMiddle = self.distance(1065, 220, sx, sy)
 
-                # Find intersection of left side of palm with bottom of the purple box
+                # Find intersection of left side of palm with bottom of ROI
                 d1 = self.distance(sx, sy, thumbIndex[0], thumbIndex[1])    # distance from left of palm to thumbIndex
                 d2 = self.distance(sx, sy, pinkyIndex[0], pinkyIndex[1])    # distance from left of palm to pinkyIndex
 
@@ -222,7 +234,7 @@ class FingerDetect(App):
                     leftPalmPt = (sx, sy)
                     minDistToLeft = self.distance(950, 450, sx, sy)
 
-                # Find intersection of the right of palm with bottom of the purple box
+                # Find intersection of the right of palm with bottom of ROI
                 if ((sy == 450) and (self.distance(1180, 450, pinkyIndex[0], pinkyIndex[1]) < minDistToRight)
                                 and (d2 < d1)):
                     rightPalmPt = (sx, sy)
@@ -283,36 +295,36 @@ class FingerDetect(App):
                 units = 10
 
                 # find new pos for Player based upon deltaX, deltaY
-                '''if (deltaX < 0):
-                    if (deltaY < 0):
-                        newCoords = (px - units, py - units)
-                    elif (deltaY > 0):
-                        newCoords = (px - units, py + units)
+                if self.playMaze:
+                    if (1045 <= x <= 1085) and (220 <= y <= 260):
+                        (newX, newY) = (px, py - units)
+                    elif (1140 <= x <= 1180) and (315 <= y <= 335):
+                        (newX, newY) = (px + units, py)
+                    elif (1045 <= x <= 1085) and (410 <= y <= 450):
+                        (newX, newY) = (px, py + units)
+                    elif (950 <= x <= 990) and (315 <= y <= 335):
+                        (newX, newY) = (px - units, py)
                     else:
-                        newCoords = (px - units, py)
-                elif (deltaX > 0):
-                    if (deltaY < 0):
-                        newCoords = (px + units, py - units)
-                    elif (deltaY > 0):
-                        newCoords = (px + units, py + units)
-                    else:
-                        newCoords = (px - units, py)
-                else:
-                    if (deltaY < 0):
-                        newCoords = (px, py - units)
-                    elif (deltaY > 0):
-                        newCoords = (px, py + units)
-                    else:
-                        newCoords = (px, py) '''
-                newX = px + 3 * deltaX
-                newY = py + 3 * deltaY
+                        (newX, newY) = (px, py)
+                else:      
+                    newX = px + 3 * deltaX
+                    newY = py + 3 * deltaY
                 
-                if (0 < newX < self.width) and (0 < newY < self.height):
-                    FingerDetect.Player.updateCoords(newX, newY)
+                offset = FingerDetect.Player.radius
+                if self.playMaze:
+                    if (100 + offset < newX < 550 - offset) and (100 + offset < newY < 400 - offset):
+                        # account for if collision with boundary occurs
+                        if not self.isCollision(newX, newY):
+                            FingerDetect.Player.updateCoords(newX, newY)
+                        else:
+                            FingerDetect.Player.updateCoords(px, py)
+                else:
+                    if ((offset < newX < self.width - offset) and (offset < newY < self.height - offset)):
+                        FingerDetect.Player.updateCoords(newX, newY)
                 FingerDetect.FingerMouse.positions.append((x, y))
                 FingerDetect.FingerMouse.positions.pop(0)
 
-            # show / hide contours + virtual mouse depending on button pressed
+            # show/hide contours + virtual mouse depending on if EYE button pressed
             if self.showEye:
                 self.frame = cv2.drawContours(self.frame, [largestContours], -1, (0, 255, 255), 3) 
                 return cv2.circle(self.frame, FingerDetect.FingerMouse.getCoords(), 8, (255,0,0), -1)
@@ -321,6 +333,13 @@ class FingerDetect(App):
         else:
             return self.frame
 
+    def isCollision(self, x, y):
+        for (mx, my) in self.mazePts:
+            if self.distance(x, y, mx, my) <= FingerDetect.Player.radius + 2:
+                return True
+        return False
+
+    # finds largest contour by PERIMETER given a list containing contours
     def findLargestCont(self, contours):
         ind = maxP = 0
         minimumPer = 100
@@ -332,6 +351,7 @@ class FingerDetect(App):
                 ind = layer
         return contours[ind]
 
+    # draws circles over the fingertips of each finger
     def drawCircleFingers(self, pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex):
         self.frame = cv2.circle(self.frame, pinkyIndex, 6, (0,0,255), -1)
         self.frame = cv2.circle(self.frame, thumbIndex, 6, (0,0,255), -1)
@@ -339,6 +359,7 @@ class FingerDetect(App):
         self.frame = cv2.circle(self.frame, ringIndex, 6, (0,0,255), -1)
         return cv2.circle(self.frame, middleIndex, 6, (0,0,255), -1)
 
+    # draws lines from each fingertip to the middle of the user's palm
     def drawSkeletonLines(self, pinkyIndex, thumbIndex, pointerIndex, ringIndex, middleIndex, midPalmPt):
         self.frame = cv2.line(self.frame, pinkyIndex, midPalmPt, (255,0,0), 2)
         self.frame = cv2.line(self.frame, thumbIndex, midPalmPt, (255,0,0), 2)
@@ -352,18 +373,59 @@ class FingerDetect(App):
     def midPoint(self, x0, y0, x1, y1):
         return ((x0 + x1) // 2, (y0 + y1) // 2)
 
+    # Algorithm provided by CITATION: https://rosettacode.org/wiki/Maze_generation#Python
+    # Code modified to 1) enable manipulation with arrays & other strings and 2) store positions to draw maze on Tkinter canvas
+    def createMaze(self, w = 10, h = 5):
+        visited = [[0] * w + [1] for _ in range(h)] + [[1] * (w + 1)]
+        ver = [['|  '] * w + ['|'] for _ in range(h)] + [[]]
+        hor = [['+--'] * w + ['+'] for _ in range(h + 1)]
+
+        ver, hor = self.walk(randrange(w), randrange(h), visited, ver, hor)
+
+        s = ""
+        for (a, b) in zip(hor, ver):
+            s += ''.join(a + ['\n'] + b + ['\n'])
+
+        newString = textwrap.wrap(s, 31)
+
+        offset = 0
+        for row in range(len(newString)):
+            for col in range(len(newString[0])):
+                if newString[row][col] != ' ':
+                    self.mazePts.append((100 + 15 * col, 100 + offset))
+            offset += 30
+
+        return s
+    
+    def walk(self, x, y, visited, ver, hor):
+        visited[y][x] = 1
+
+        d = [(x - 1, y), (x, y + 1), (x + 1, y), (x, y - 1)]
+        shuffle(d)
+        for (xx, yy) in d:
+            if visited[yy][xx]: continue
+            if xx == x: hor[max(y, yy)][x] = '+  '
+            if yy == y: ver[y][max(x, xx)] = '   '
+            self.walk(xx, yy, visited, ver, hor) 
+        
+        return ver, hor
+
     def keyPressed(self, event):
         # terminate webcam frame read if 't' pressed at any time
         if event.key == 't':
             FingerDetect.vs.stop()
 
-        if self.introductionPage and event.key == 's':
+        elif self.introductionPage and event.key == 's':
             self.isStartPressed = True
             self.introductionPage = False
 
-        if self.isStartPressed and event.key == 'd':
+        elif self.isStartPressed and event.key == 'd':
             self.onlyPoints = True
+        
+        elif self.playMaze and event.key == 'r':
+            FingerDetect.Player.updateCoords(130, 130)
 
+        # boolean flags for Tutorial
         if self.learnPage1 and event.key == 'c':
             self.learnPage1B = True
             self.learnPage1 = False
@@ -410,19 +472,34 @@ class FingerDetect(App):
 
     def timerFired(self):
         if self.isStartPressed or self.thresholdDetect or self.playChallenge:
-            # draw Box for hand:
+            # draw ROI for hand:
             (x0, y0) = (950, 220)
             (x1, y1) = (1180, 450)
 
             self.finalImg = cv2.rectangle(self.createFrames(), (x0,  y0), (x1, y1), (128,0,128), 3)
-
+            
             if self.playChallenge:
+                currentPos = FingerDetect.Player.getCoords()
+                
                 # add up to 5 old positions to construct "tail" of Player
                 if (len(FingerDetect.Player.positions) < 5):
-                    currentPos = FingerDetect.Player.getCoords()
                     FingerDetect.Player.positions.append(currentPos)
                 else:
                     FingerDetect.Player.positions.pop(0)
+                
+                if self.playMaze:
+                    (px, py) = currentPos
+                    (c1x, c1y) = self.coin1Pos
+                    (c2x, c2y) = self.coin2Pos
+                    if self.distance(px, py, c1x, c1y) <= FingerDetect.Player.radius + 2 and self.notDrawCoin1 == False:
+                        self.notDrawCoin1 = True
+                        FingerDetect.Player.score += 5
+                    elif self.distance(px, py, c2x, c2y) <= FingerDetect.Player.radius + 2 and self.notDrawCoin2 == False:
+                        self.notDrawCoin2 = True
+                        FingerDetect.Player.score += 5
+                    
+                    if self.distance(px, py, 530, 370) <= FingerDetect.Player.radius:
+                        self.winner = True
 
     def mousePressed(self, event):
         (x, y) = (event.x, event.y)
@@ -440,13 +517,21 @@ class FingerDetect(App):
                 self.thresholdDetect = True
                 self.hideEye = True
 
-            # SECOND click: transition to solving drawing/maze challenge
+            # SECOND click: transition to solving drawing
             elif (self.thresholdDetect):
                 self.thresholdDetect = False
                 self.playChallenge = True
                 FingerDetect.Player.updateCoords(150, 300)
                 mousePos = FingerDetect.FingerMouse.getCoords()
                 FingerDetect.FingerMouse.positions.append(mousePos)
+
+            # THIRD click: transition to maze challenge
+            elif (self.playChallenge):
+                self.playMaze = True
+                self.createMaze()
+                self.coin1Pos = self.findCoinPos()
+                self.coin2Pos = self.findCoinPos()
+                FingerDetect.Player.updateCoords(515, 370)
 
         # Mouse clicks HIDE/SHOW button
         if self.thresholdDetect or self.playChallenge:
@@ -459,7 +544,7 @@ class FingerDetect(App):
         
         # Mouse clicks LEARN button
         if ((self.isStartPressed) or (self.thresholdDetect) or (self.playChallenge)) and (self.width - 50 <= x <= self.width - 15) and (self.height - 50 <= y <= self.height - 15):
-            FingerDetect.vs.stop()
+            FingerDetect.vs.stop()      # stop reading frames from webcam
             self.learnPage1 = True
             if self.isStartPressed:
                 self.isStartPressed = False
@@ -473,7 +558,7 @@ class FingerDetect(App):
             self.isFirstPage = True
             self.finalNote = False
             self.restartApp()
-            FingerDetect.vs.start()
+            FingerDetect.vs.start()     # restart reading frames from webcam again
 
     def mouseMoved(self, event):
         (x, y) = (event.x, event.y)
@@ -490,8 +575,14 @@ class FingerDetect(App):
         else:
             self.mouseHoverLearn = False
 
-        ''' if self.learnPage1:
-            print(x, y) '''
+    def findCoinPos(self):
+        x = randint(110, 540)
+        y = randint(100, 390)
+        for (px, py) in self.mazePts:
+            while (self.distance(x, y, px, py) <= 10) or ((x, y) == self.coin1Pos) or ((x, y) == self.coin2Pos):
+                x = randint(110, 540)
+                y = randint(100, 390)
+        return (x, y)
 
     def redrawAll(self, canvas):
         if self.isStartPressed or self.thresholdDetect or self.playChallenge:
@@ -508,13 +599,38 @@ class FingerDetect(App):
                     self.drawErrorMessage(canvas)
                 
                 if self.playChallenge:
+                    # draw Maze
+                    if self.playMaze:
+                        self.drawMaze(canvas)
+                    
+                        canvas.create_text(self.width / 8 - 20, 20, text="B. Maze Game", font="Courier 20 bold", fill="white")
+                        canvas.create_text(self.width - 60, 20, text=f"Score: {FingerDetect.Player.score}", fill="white", font="Courier 17")
+
+                        canvas.create_oval(120, 120, 140, 140, fill="red", width=0)
+                        canvas.create_oval(520, 360, 540, 380, fill="blue", width=0)
+                        
+                        if not self.notDrawCoin1 and not self.winner:
+                            self.drawCoin1(canvas)
+                        
+                        if not self.notDrawCoin2 and not self.winner:
+                            self.drawCoin2(canvas)
+                        
+                        if self.winner:
+                            canvas.create_text(325, 450, text="You Win!", font="Courier 32 bold", fill="white")
+
+                        self.drawMazeDirections(canvas)
+
                     # draw Player
                     (px, py) = FingerDetect.Player.getCoords()
                     r = FingerDetect.Player.radius
-                    canvas.create_oval(px - r, py - r, px + r, py + r, fill=FingerDetect.Player.color, outline="white", width=2)
+                    if not self.winner:
+                        canvas.create_oval(px - r, py - r, px + r, py + r, fill=FingerDetect.Player.color, outline="white", width=2)
 
-                    # draw Player tail
-                    self.drawPlayerTail(canvas)
+                    if not self.playMaze:
+                        canvas.create_text(self.width / 8, 20, text="A. Virtual Mouse", font="Courier 20 bold", fill="white")
+                        
+                        # draw Player tail
+                        self.drawPlayerTail(canvas)
 
             if self.mouseHoverLearn:
                 # shows border when mouse hovers
@@ -682,11 +798,11 @@ class FingerDetect(App):
 
         if self.xDir or self.yDir:
             canvas.create_text(self.width / 4, 375, text="X-Direction", font="Courier 18 bold")
-            canvas.create_image(self.width / 4, 460, image=ImageTk.PhotoImage(self.tryThis(xImg)))
+            canvas.create_image(self.width / 4, 460, image=ImageTk.PhotoImage(self.convertImg(xImg)))
             canvas.create_image(self.width / 4 + 180, 460, image=ImageTk.PhotoImage(self.sobelX))
             if self.yDir:
                 canvas.create_text(3 * self.width / 4, 375, text="Y-Direction", font="Courier 18 bold")
-                canvas.create_image(3 * self.width / 4 - 70, 460, image=ImageTk.PhotoImage(self.tryThis(yImg)))
+                canvas.create_image(3 * self.width / 4 - 70, 460, image=ImageTk.PhotoImage(self.convertImg(yImg)))
                 canvas.create_image(3 * self.width / 4 + 105, 460, image=ImageTk.PhotoImage(self.sobelY))
 
     def drawLearnPage4(self, canvas):
@@ -708,7 +824,15 @@ class FingerDetect(App):
             canvas.create_image(self.width // 2 + 230, 460, image=ImageTk.PhotoImage(scaledMag))
     
     def drawFinalNote(self, canvas):
+        newImg = self.fromPILtoOpenCV(self.katniss)
+        newImg = self.grayscaleImg(newImg) 
+        nextImg = self.sobelIntensityGradient(newImg)
+        finalImg = self.nonMaxSup(nextImg)
+
         canvas.create_text(self.width / 2, 60, text="A Final Note", font="Courier 30 bold")
+
+        canvas.create_image(self.width // 2, 390, image=ImageTk.PhotoImage(self.convertImg(finalImg)))
+
         canvas.create_text(self.width / 2, 200, text="The Canny edge detection algorithm available from the OpenCV library\nperforms similar steps, except in a more optimized fashion.", font="Courier 20")
         canvas.create_text(self.width / 2, 275, text="The algorithm implemented for the tutorial is unfortunately less\nefficient,since we apply convolutions pixel-by-pixel as we shift\nacross the image matrix.", font="Courier 20")
         canvas.create_text(self.width / 2, 375, text="In addition, the accepted algorithm from OpenCV conducts two\nadditional steps, non-maximum suppression and hystersis thresholding\nto A) suppress values that are probably not edges", font="Courier 20")
@@ -719,6 +843,40 @@ class FingerDetect(App):
         canvas.create_text(self.width / 2, self.height - 50, text="DONE", font = "Courier 28 bold")
         canvas.create_rectangle(self.width / 2 - 40, self.height - 70, self.width / 2 + 40, self.height - 30, outline="black", width=3)
 
+    def drawMaze(self, canvas):
+        canvas.create_rectangle(90, 90, 560, 410, fill="black")
+        self.drawMazePoints(canvas)
+
+    def drawMazePoints(self, canvas):
+        r = 4
+        for (x, y) in self.mazePts:
+            canvas.create_oval(x - r, y - r, x + r, y + r, fill="white", width=0)
+
+    def drawMazeDirections(self, canvas):
+        # up
+        canvas.create_rectangle(760, 170, 800, 210, outline="white", width=1)
+        canvas.create_text(780, 190, text="U", font="Courier 23 bold", fill="white")
+
+        # right
+        canvas.create_rectangle(840, 250, 880, 290, outline="white", width=1)
+        canvas.create_text(860, 270, text="R", font="Courier 23 bold", fill="white")
+
+        # down
+        canvas.create_rectangle(760, 340, 800, 380, outline="white", width=1)
+        canvas.create_text(780, 360, text="D", font="Courier 23 bold", fill="white")
+
+        # left
+        canvas.create_rectangle(670, 250, 710, 290, outline="white", width=1)
+        canvas.create_text(690, 270, text="L", font="Courier 23 bold", fill="white")
+
+    def drawCoin1(self, canvas):
+        (x1, y1) = self.coin1Pos
+        canvas.create_image(x1, y1, image=ImageTk.PhotoImage(self.coin))
+
+    def drawCoin2(self, canvas):
+        (x2, y2) = self.coin2Pos
+        canvas.create_image(x2, y2, image=ImageTk.PhotoImage(self.coin))
+
     # Learning how to convert from PIL image to OpenCV: https://stackoverflow.com/questions/43232813/convert-opencv-image-format-to-pil-image-format
     def fromPILtoOpenCV(self, PILimg):
         np_img = np.array(PILimg)
@@ -728,7 +886,7 @@ class FingerDetect(App):
         convert = cv2.cvtColor(openCVimg, cv2.COLOR_BGR2RGB)
         return Image.fromarray(convert)
 
-    def tryThis(self, openCVimg):
+    def convertImg(self, openCVimg):
         return Image.fromarray(openCVimg)
 
     # Part 2 of Project
@@ -809,6 +967,14 @@ class FingerDetect(App):
         return newImgArr
 
     def sobelIntensityGradient(self, img):
+        finalImg, gradImg = self.calculateGradient(img)
+        
+        # See citation from above
+        finalImg = ((finalImg - finalImg.min()) * (1/(finalImg.max() - finalImg.min()) * 255)).astype('uint8')
+
+        return finalImg
+    
+    def calculateGradient(self, img):
         theImg = self.reduceNoiseAndBlur(img)
 
         sobelXImg = self.sobelKernelConvolutionX(theImg)
@@ -844,14 +1010,12 @@ class FingerDetect(App):
                     else: angle = math.pi / 2
 
                 grad_dir[row][col] = (edge_Grad, angle)
-        
-        # See citation from above
-        finalImg = ((finalImg - finalImg.min()) * (1/(finalImg.max() - finalImg.min()) * 255)).astype('uint8')
 
-        return finalImg
+        return finalImg, grad_dir
 
-    def nonMaxSup(self):
-        arr = self.sobelIntensityGradient()
+    def nonMaxSup(self, img):
+        finalImg, arr = self.calculateGradient(img)
+
         suppressed = np.zeros((len(arr), len(arr[0])), dtype=float)
 
         for cRow in np.arange(1, len(suppressed) - 1):
@@ -894,8 +1058,10 @@ class FingerDetect(App):
         
         return suppressed
 
-
     # Miscellaneous Functions
+    def make2dList(self, rows, cols, val):
+        return [ ([val] * cols) for row in range(rows) ]
+
     def debuggingScript(self, place):
         # prints line to test if program runs up to that line
         print(f"Working up to {place}!!")
